@@ -25,6 +25,10 @@ logger = logging.getLogger()
 def build_conv(
     prompt: str, response: str | None, system_prompt: str
 ) -> list[dict[str, str]]:
+    '''
+    build_conv: It builds conversation contexts (as dictionary) for each prompt
+    with 3 parameters prompt, response, and system_prompt.
+    '''
     conversation = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
@@ -36,7 +40,9 @@ def build_conv(
     return conversation
 
 
+
 def last(x):
+    ''' A utility function to retrieve the last element of a list. '''
     if len(x) == 0:
         logger.warning("empty list")
         return 0
@@ -44,6 +50,7 @@ def last(x):
 
 
 def list_mean(x):
+    ''' A utility function to compute the mean of a list using NumPy. '''
     if len(x) == 0:
         logger.warning("empty list")
         return 0
@@ -84,6 +91,13 @@ def generate_k_steps(
     sampling_params: SamplingParams,
     beam_width: int,
 ) -> list[Beam]:
+    '''
+    Generate beam searches over multiple steps.
+    Args:
+    - templated_convs: a list of templated conversation prompts
+        check chat_template example in beam_search.py
+    - beam-width: number of beams per prompt 
+    '''
     gen_results = []
     for i, text in enumerate(templated_convs):
         for j in range(beam_width):
@@ -102,32 +116,52 @@ def generate_k_steps(
     for i in range(lookahead_steps + 1):
         if i == 1:
             gen_sampling_params.temperature = 0.0  # greedy for the rest of the steps
-        # get all generations that did not finish with eos
+
+        # filter out completed sequences that end with end of sequence token (EOS)
+        # within the gen_results list, completed sequences (that llm can
+        # generate more steps) stay the same in the gen_results list,
+        # we continue to generate lookahead steps with non-completed sequences
         current_gen = [
             gen_results[i]
             for i in range(len(gen_results))
             if gen_results[i].stop_reason != "EOS"
         ]
+
+        # construct gen_prompts by by concatenating
+        # initial_prompt and lookahead_text for each active GenResult.
         gen_prompts = [
             gen_result.initial_prompt + gen_result.lookahead_text
             for gen_result in current_gen
         ]
+
+        # generate text using the llm model with gen_prompts and gen_sampling_params,
         llm_outputs = llm.generate(gen_prompts, gen_sampling_params, use_tqdm=False)
+
+        # iterates over pairs of gen_result (from current_gen)
+        # and output (from llm_outputs)
         for gen_result, output in zip(current_gen, llm_outputs):
+            # extract the generated text 
             gen_text = output.outputs[0].text
-            if i == 0:
+
+            # check first lookahead step (i = 0) 
+            if i == 0:          
                 gen_result.first_step_text = gen_text
                 gen_result.first_step_stop_reason = output.outputs[0].stop_reason
+                # 
+                # if the stop_reason is None then it is end of sequence (OES)
                 if gen_result.first_step_stop_reason is None:
                     gen_result.first_step_stop_reason = "EOS"
 
+            # other lookahead steps (i > 0)
             gen_result.lookahead_text = gen_result.lookahead_text + gen_text
             gen_result.stop_reason = output.outputs[0].stop_reason
+            # if the stop_reason is None then it is end of sequence (OES)
             if gen_result.stop_reason is None:
                 gen_result.stop_reason = "EOS"
 
     outputs: list[Beam] = []
 
+    # collect beam outputs 
     counter = 0
     for i, text in enumerate(templated_convs):
         next_texts = []
@@ -140,6 +174,8 @@ def generate_k_steps(
             stop_reasons.append(gen_result.first_step_stop_reason)
             counter += 1
 
+        # each beam consists of a beam-width number of next steps and
+        # lookahead steps
         beam_result = Beam(
             prompt=text,
             index=i,
