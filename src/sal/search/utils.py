@@ -92,9 +92,9 @@ def generate_k_steps(
     beam_width: int,
 ) -> list[Beam]:
     '''
-    Generate beam searches over multiple steps.
+    Generate beams with next (immediate) step and multiple lookahead steps.
     Args:
-    - templated_convs: a list of templated conversation prompts
+    - templated_convs: a list of templated conversation (prompts)
         check chat_template example in beam_search.py
     - beam-width: number of beams per prompt 
     '''
@@ -113,6 +113,7 @@ def generate_k_steps(
 
     gen_sampling_params = copy.deepcopy(sampling_params)
 
+    # generate text for multiple lookahead steps
     for i in range(lookahead_steps + 1):
         if i == 1:
             gen_sampling_params.temperature = 0.0  # greedy for the rest of the steps
@@ -147,7 +148,7 @@ def generate_k_steps(
             if i == 0:          
                 gen_result.first_step_text = gen_text
                 gen_result.first_step_stop_reason = output.outputs[0].stop_reason
-                # 
+                
                 # if the stop_reason is None then it is end of sequence (OES)
                 if gen_result.first_step_stop_reason is None:
                     gen_result.first_step_stop_reason = "EOS"

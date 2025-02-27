@@ -141,7 +141,8 @@ https://github.com/vllm-project/vllm/blob/550d97eb58f03b21f0f4c9ef1935c2789186a5
 
 def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[Beam]:
     '''
-    _beam_search: private function, the core beam search algorithm 
+    Core beam search algorithm that generate n sequences
+    * Args
     - batch_of_prompts: 
         a list of input prompts ["What is the capital of USA", "What is the length of the Nile River?"]
         config: a Config object with settings
@@ -187,8 +188,15 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
         else:
             active_beams = [b for b in active_beams if not b.pruned]
 
+        '''
+        how the algorithm works:
+        - 1. at iteration i = 0, we have n active beams 
+        - 2. for each active beams we generate one next step (node)
+        - 3. we selects the top s = n/beam-width beams to be active beams for next iteration
+        - 4. at iteration i = 1, we duplicate the s active beams by beam-width
+        - 5. continue step 2. 
+        '''
         # duplicate active beams to ensure that we have config.n beams per iteration
-        # when do we have to duplicate active beams?
         if len(active_beams) != config.n:
             repeats = (config.n // len(active_beams)) + 1
             logger.debug(
@@ -215,7 +223,9 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
                 n=1,
             )
 
-        # builds conversation contexts for each active beam
+        # build conversation dictionary that will be used later in apply_chat_template
+        # this specifies three roles and their contents
+        # system (system_promt), user (prompt), assistant (chatgpt response)
         convs = [
             build_conv(b.prompt, b.current_text, config.system_prompt)
             for b in active_beams
@@ -237,12 +247,11 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
         if config.custom_chat_template is not None:
             tokenizer.chat_template = config.custom_chat_template
 
-        # 
         '''
         apply_chat_template: format conversations using the chat template.
         # https://huggingface.co/docs/transformers/main/en/chat_templating
 
-        *** i == 1 ***
+        *** i == 0 ***
         <|start_header_id|>system<|end_header_id>
 
         Cutting Knowledge Date: December 2023
@@ -326,7 +335,6 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
         <|eot_id|> indicates the end of a message or section within a structured 
             chat template used for language model interactions.
         '''
-        
         templated_convs = tokenizer.apply_chat_template(
             convs,
             add_generation_prompt=add_generation_prompt,
@@ -334,46 +342,67 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
             tokenize=True       # return strings, not token IDs, e.g.,
                                 # [[128006, 9125, 128007, 271, 38766]?
         )
-        print(templated_convs)
-        stop
 
         # set number of lookahead steps, 0 (no lookahead) on the last iteration 
         lookahead = 0 if i == config.num_iterations - 1 else config.lookahead
 
-        # 
+        '''
+        # generate_k_steps: generate Beam objects with next (immediate) step
+        # and lookahead steps.
+        # If there are 6 templated_convs (prompts) then, it will generate
+        # 6 Beam objects, each beam have 1 next step and 1 lookahead steps
+        # the 
+        # Notes
+        # 1. beam width is already created when 
+        # 2. next step is a sequence that end with double newlines "\n\n"
+            e.g., ## Step 1: .... \n\n
+            typically next step only consists of one thinking step
+            i.e., ## Step 1: ... \n\n
+            however, there are cases where it consists multiple thinking steps
+            i.e., ## Step 1: ... \n ## Step 2: ... \n ## Step 3: ... \n\n 
+        '''
         gen_results = generate_k_steps(
-            templated_convs, lookahead, llm, sampling_params, 1
+            templated_convs,    # list of templated conversion (prompts)
+            lookahead,
+            llm,
+            sampling_params,
+            1                   # beam_width
         )
 
         prompts, completions = [], []
 
+        # update each beam with generation results 
         for beam, gen_result in zip(active_beams, gen_results, strict=True):
-            # print(beam)
-            beam.next_texts = gen_result.next_texts
-            beam.stop_reasons = gen_result.stop_reasons
-            beam.lookahead_texts = gen_result.lookahead_texts
-            beam.completion_tokens += gen_result.completion_tokens
-            beam.current_text += beam.next_texts[0]
+            beam.next_texts = gen_result.next_texts  # next immediate steps
+            beam.stop_reasons = gen_result.stop_reasons  # stop reasons
+            beam.lookahead_texts = gen_result.lookahead_texts  # 
+            beam.completion_tokens += gen_result.completion_tokens  # tokens count
+            beam.current_text += beam.next_texts[0]                 # current text sequence until now (only solution steps, exclude initial prompt)
             beam.history.append(beam.next_texts[0])
-            # print()
-            # print(gen_result.next_texts)
-            # print("stop_reason")
-            # print(gen_result.stop_reasons)
-            # print("lookahead_text")
-            # print(gen_result.lookahead_texts)
-            # print("completion_tokens")
-            # print(gen_result.completion_tokens)
 
+            # mark a beam as completed if generation ends
+            # generation ends required beam satisfying one of 3 criteria
             if (
-                beam.stop_reasons[0] == "EOS"
-                or beam.stop_reasons[0] == "length"
-                or beam.next_texts[0] == ""
+                beam.stop_reasons[0] == "EOS"       # stop reason is end of sequence
+                or beam.stop_reasons[0] == "length"  # not sure when 
+                or beam.next_texts[0] == ""          # llm can not generate next steps 
             ):
                 beam.completed = True
                 completed_beams.append(beam)
+
+            # collect prompts and completions for scoring
             prompts.append(beam.prompt)
             completions.append([beam.current_text])
 
+        # compute scores and aggregate scores for each completion
+        # three aggregate methods: last, min, product
+        '''
+        completions
+        [['## Step 1: Understand the conversion formulas\nTo convert from rectangular (Cartesian) coordinates $(x, y)$ to polar coordinates $(r, \\theta)$, we use the following formulas:\n$r = \\sqrt{x^2 + y^2}$ for the radial coordinate,\n$\\theta = \\arctan\\left(\\frac{y}{x}\\right)$ for the angular coordinate.\n\n## Step 2: Calculate the radial coordinate $r$\nUsing the formula $r = \\sqrt{x^2 + y^2}$, we substitute $x = 0$ and $y = 3$:\n$r = \\sqrt{0^2 + 3^2} = \\sqrt{0 + 9} = \\sqrt{9} = 3$.\n\n'], ['## Step 1: Recall the formulas for converting rectangular coordinates to polar coordinates\nThe relationship between rectangular coordinates $(x,y)$ and polar coordinates $(r,heta)$ is given by $x = r\\cos(heta)$ and $y = r\\sin(heta)$.\n\n## Step 2: Plug in the given rectangular coordinates into the formulas\nWe have $(x,y) = (0,3)$, so $x = 0 = r\\cos(heta)$ and $y = 3 = r\\sin(heta)$.\n\n']]
+        scores
+        [[[0.99609375, 1.0, 0.9609375]], [[0.99609375, 1.0, 0.96875]]]
+        [[0.9609375], [0.96875]]
+        '''
         scores = prm.score(prompts, completions)
         agg_scores = [
             [aggregate_scores(s, config.agg_strategy) for s in score]
@@ -384,19 +413,19 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
             beam.all_scores = score[0]
 
 
-        # Now filter active_beams and agg_scores for beams that are completed
+        # filter active_beams and agg_scores for beams that are completed
         agg_scores = [
             agg_scores[i] for i, b in enumerate(active_beams) if not b.completed
         ]
         active_beams = [b for b in active_beams if not b.completed]
 
-        # Early stopping if all beams are completed
+        # early stopping if all beams are completed
         if len(active_beams) == 0:
             break
 
-        # Filter duplicate active beams
+        # filter duplicate active beams
         if config.filter_duplicates:
-            # Create a dictionary to filter duplicates and retain order
+            # create a dictionary to filter duplicates and retain order
             unique_beam_dict = {}
             for i, b in enumerate(active_beams):
                 if b.current_text not in unique_beam_dict:
@@ -406,7 +435,7 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
             active_beams = [active_beams[i] for i in unique_beam_dict.values()]
             agg_scores = [agg_scores[i] for i in unique_beam_dict.values()]
 
-        # Get indices for top (config.n / config.beam_width) completions
+        # get indices for top (config.n / config.beam_width) completions
         top_indices = np.argsort(np.array(agg_scores).flatten())[
             -(config.n // config.beam_width) :
         ]
@@ -415,7 +444,7 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
             if idx not in top_indices:
                 beam.pruned = True
 
-    # Filter completed beams for those with top config.n scores
+    # filter completed beams for those with top config.n scores
     if config.sort_completed:
         completed_beams = sorted(
             completed_beams,
@@ -426,7 +455,7 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
         completed_beams = completed_beams[: config.n]
 
     if len(completed_beams) != config.n:
-        # If we don't have enough completed_beams, duplicate until we reach config.n
+        # if we don't have enough completed_beams, duplicate until we reach config.n
         repeats = (config.n // len(completed_beams)) + 1
         logger.debug(
             f"Extending completed_beams with {repeats} repetitions to reach size {config.n}"
@@ -440,16 +469,23 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
 
 
 def beam_search(examples, config: Config, llm: LLM, prm: PRM):
+    '''
+    Algorithm that uses _beam_search to generate n sequence, then
+        picks the sequence with highest aggregate score 
+    '''
     problems = examples["problem"]
+    # generate n solution sequences 
     beam_results = _beam_search(problems, config, llm, prm)
 
-    # Group together alike beams and store in the dataset
+    # group together alike beams and store in the dataset
     grouped_results = defaultdict(list)
     for results in beam_results:
         grouped_results[results.prompt].append(results)
 
     results = {"completions": [], "pred": [], "completion_tokens": [], "scores": []}
 
+    # for each of the problem, find the best 
+    # 
     for p in problems:
         beams = grouped_results[p]
         completions = [b.current_text for b in beams]
