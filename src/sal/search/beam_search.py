@@ -396,6 +396,7 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
 
         # compute scores and aggregate scores for each completion
         # three aggregate methods: last, min, product
+        # not sure how the PRM works. for a completion with outputs 3 scores for a completion with 
         '''
         completions
         [['## Step 1: Understand the conversion formulas\nTo convert from rectangular (Cartesian) coordinates $(x, y)$ to polar coordinates $(r, \\theta)$, we use the following formulas:\n$r = \\sqrt{x^2 + y^2}$ for the radial coordinate,\n$\\theta = \\arctan\\left(\\frac{y}{x}\\right)$ for the angular coordinate.\n\n## Step 2: Calculate the radial coordinate $r$\nUsing the formula $r = \\sqrt{x^2 + y^2}$, we substitute $x = 0$ and $y = 3$:\n$r = \\sqrt{0^2 + 3^2} = \\sqrt{0 + 9} = \\sqrt{9} = 3$.\n\n'], ['## Step 1: Recall the formulas for converting rectangular coordinates to polar coordinates\nThe relationship between rectangular coordinates $(x,y)$ and polar coordinates $(r,heta)$ is given by $x = r\\cos(heta)$ and $y = r\\sin(heta)$.\n\n## Step 2: Plug in the given rectangular coordinates into the formulas\nWe have $(x,y) = (0,3)$, so $x = 0 = r\\cos(heta)$ and $y = 3 = r\\sin(heta)$.\n\n']]

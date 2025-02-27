@@ -26,7 +26,7 @@ def build_conv(
     prompt: str, response: str | None, system_prompt: str
 ) -> list[dict[str, str]]:
     '''
-    build_conv: It builds conversation contexts (as dictionary) for each prompt
+    build_conv: It builds conversation dictionary for each prompt
     with 3 parameters prompt, response, and system_prompt.
     '''
     conversation = [
