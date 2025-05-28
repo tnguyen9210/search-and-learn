@@ -47,7 +47,9 @@ def score(dataset: Dataset, config: Config) -> Dataset:
     dataset = dataset.map(
         lambda x: {"agg_scores": [aggregate_scores(s, "last") for s in x["scores"]]}
     )
-    subsets = [2**i for i in range(config.n) if 2**i <= config.n]
+    # subsets = [2**i for i in range(2,8) if 2**i <= config.n]
+    subsets = [config.n]
+    print(subsets)
     for n in tqdm(subsets, desc="Computing majority & weighted predictions"):
         dataset = dataset.map(
             subsample_completions,
@@ -80,6 +82,7 @@ def score(dataset: Dataset, config: Config) -> Dataset:
             desc=f"Compute naive pred {n}",
         )
         # Nuke unused columns to keep dataset lean
+        # print(dataset)
         dataset = dataset.remove_columns(
             [f"completions@{n}", f"agg_scores@{n}", f"preds@{n}"]
         )

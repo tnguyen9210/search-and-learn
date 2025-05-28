@@ -98,8 +98,8 @@ def subsample_completions(x: Dict[str, List[Any]], n: int) -> Dict[str, List[Any
     # Take the first n samples, as the completions are ordered in groups of size m e.g [0,0,0,0, 1,1,1,1, 2,2,2,2, ...]
     # We need to ensure these groups are not broken up in order to have a valid comparison at smaller n
     return {
-        f"completions@{n}": completions[:n],
-        f"agg_scores@{n}": agg_scores[:n],
+        f"completions@{n}": completions,
+        f"agg_scores@{n}": agg_scores,
     }
 
 
@@ -117,6 +117,8 @@ def extract_completion_answers(
 def compute_naive_pred(x: Dict[str, List[Any]], n: int) -> Dict[str, List[str]]:
     preds = x[f"preds@{n}"]
     scores = x[f"agg_scores@{n}"]
+    if len(preds) == 0:
+        return {f"pred_naive@{n}": "\\boxed{NA}"}
     preds = [
         (p, s) for p, s in sorted(zip(preds, scores), key=lambda x: x[1], reverse=True)
     ]
@@ -126,6 +128,8 @@ def compute_naive_pred(x: Dict[str, List[Any]], n: int) -> Dict[str, List[str]]:
 def compute_weighted_pred(x: Dict[str, List[Any]], n: int) -> Dict[str, List[str]]:
     preds = x[f"preds@{n}"]
     scores = x[f"agg_scores@{n}"]
+    if len(preds) == 0:
+        return {f"pred_weighted@{n}": "\\boxed{NA}"}
     return {
         f"pred_weighted@{n}": "\\boxed{"
         + find_answer_with_largest_sum(preds, scores)
@@ -135,6 +139,8 @@ def compute_weighted_pred(x: Dict[str, List[Any]], n: int) -> Dict[str, List[str
 
 def compute_maj_pred(x: Dict[str, List[Any]], n: int) -> Dict[str, List[str]]:
     preds = x[f"preds@{n}"]
+    if len(preds) == 0:
+            return {f"pred_maj@{n}": "\\boxed{NA}"}
     return {f"pred_maj@{n}": "\\boxed{" + find_majority_answer(preds) + "}"}
 
 

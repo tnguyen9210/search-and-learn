@@ -58,7 +58,7 @@ def save_dataset(dataset, config):
                 url = dataset.push_to_hub(
                     config.hub_dataset_id,
                     revision=config.revision,
-                    split="train",
+                    split="test",
                     private=config.hub_dataset_private,
                     commit_message=f"Add {config.revision}",
                 )

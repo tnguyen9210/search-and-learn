@@ -173,26 +173,26 @@ def _beam_search(batch_of_prompts, config: Config, llm: LLM, prm: PRM) -> list[B
             if idx not in top_indices:
                 beam.pruned = True
 
-    # Filter completed beams for those with top config.n scores
-    if config.sort_completed:
-        completed_beams = sorted(
-            completed_beams,
-            key=lambda b: aggregate_scores(b.all_scores, config.agg_strategy),
-            reverse=True,
-        )[: config.n]
-    else:
-        completed_beams = completed_beams[: config.n]
+    # # Filter completed beams for those with top config.n scores
+    # if config.sort_completed:
+    #     completed_beams = sorted(
+    #         completed_beams,
+    #         key=lambda b: aggregate_scores(b.all_scores, config.agg_strategy),
+    #         reverse=True,
+    #     )[: config.n]
+    # else:
+    #     completed_beams = completed_beams[: config.n]
 
-    if len(completed_beams) != config.n:
-        # If we don't have enough completed_beams, duplicate until we reach config.n
-        repeats = (config.n // len(completed_beams)) + 1
-        logger.debug(
-            f"Extending completed_beams with {repeats} repetitions to reach size {config.n}"
-        )
-        extended_completed_beams = [
-            copy.deepcopy(b) for b in (completed_beams * repeats)[: config.n]
-        ]
-        completed_beams = extended_completed_beams
+    # if len(completed_beams) != config.n:
+    #     # If we don't have enough completed_beams, duplicate until we reach config.n
+    #     repeats = (config.n // len(completed_beams)) + 1
+    #     logger.debug(
+    #         f"Extending completed_beams with {repeats} repetitions to reach size {config.n}"
+    #     )
+    #     extended_completed_beams = [
+    #         copy.deepcopy(b) for b in (completed_beams * repeats)[: config.n]
+    #     ]
+    #     completed_beams = extended_completed_beams
 
     return completed_beams
 
